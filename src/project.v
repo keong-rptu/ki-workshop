@@ -1,6 +1,6 @@
 `default_nettype none
 
-module tt_um_vga_pong_white(
+module tt_um_vga_example(
   input  wire [7:0] ui_in,   // Steuerung: P1/P2 Tasten
   output wire [7:0] uo_out,
   input  wire [7:0] uio_in,
