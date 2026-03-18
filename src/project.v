@@ -1,17 +1,22 @@
+/*
+* Copyright (c) 2025, RPTU Kaiserslautern-Landau
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 `default_nettype none
 
-module tt_um_vga_example(
+module tt_um_vga_red_car(
     input wire [7:0] ui_in, // Dedizierte Eingänge
     output wire [7:0] uo_out, // Dedizierte Ausgänge
     input wire [7:0] uio_in, // IOs: Eingangs-Pfad
     output wire [7:0] uio_out, // IOs: Ausgangs-Pfad
     output wire [7:0] uio_oe, // IOs: Enable-Pfad (aktiv High: 0=Eingang, 1=Ausgang)
-    input wire ena, // Ignorieren - immer High
+    input wire ena, // immer 1, solange das Design mit Strom versorgt ist - kann ignoriert werden
     input wire clk, // Takt
-    input wire rst_n // Aktives Low-Reset
+    input wire rst_n // reset_n - Low = Reset
 );
 
-    // VGA-Signale
+    // VGA-Signale definieren
     wire hsync;
     wire vsync;
     wire [1:0] R;
@@ -21,17 +26,21 @@ module tt_um_vga_example(
     wire [9:0] pix_x;
     wire [9:0] pix_y;
 
-    // TinyVGA PMOD
+    // Bewegungssignale und Zähler für die Geschwindigkeit
+    reg [9:0] car_pos_x; // Aktuelle X-Position der linken oberen Ecke des Autos
+    reg [20:0] speed_counter; // Zähler für die Geschwindigkeit
+
+    // VGA-Ausgänge zuweisen
     assign uo_out = {hsync, B[0], G[0], R[0], vsync, B[1], G[1], R[1]};
 
-    // Ungenutzte Ausgänge auf 0 gesetzt
+    // Ungenutzte Ausgänge auf 0 setzen
     assign uio_out = 0;
     assign uio_oe  = 0;
 
-    // Unterdrücken von Warnungen für ungenutzte Signale
+    // Unterdrücke Warnungen für ungenutzte Signale
     wire _unused_ok = &{ena, uio_in};
 
-    // VGA-Signal-Generator Instanziierung
+    // VGA-Signalgenerator-Modul instanziieren
     hvsync_generator hvsync_gen(
         .clk(clk),
         .reset(~rst_n),
@@ -42,72 +51,38 @@ module tt_um_vga_example(
         .vpos(pix_y)
     );
 
-    // Parameter für den Kreis und die Striche
-    parameter integer Y_CENTER = 200;
-    parameter integer RADIUS = 20; // Noch kleinerer Kreisradius
-    parameter integer STRAIGHT_LENGTH = 50; // Länge des senkrechten Strichs
-    parameter integer HORIZONTAL_MID_Y = Y_CENTER + RADIUS + (STRAIGHT_LENGTH / 2);
-    parameter integer CIRCLE_THICKNESS = 2; // Dicke des Kreisrandes
-
-    // Register zur Speicherung der aktuellen X-Position des Kreises
-    reg [9:0] x_center = 320;
-
-    // Bedingung für den leeren Kreis (nur der Rand)
-    wire in_circle_border = (pix_x - x_center) * (pix_x - x_center) +
-                            (pix_y - Y_CENTER) * (pix_y - Y_CENTER) >= (RADIUS - CIRCLE_THICKNESS) * (RADIUS - CIRCLE_THICKNESS) &&
-                            (pix_x - x_center) * (pix_x - x_center) +
-                            (pix_y - Y_CENTER) * (pix_y - Y_CENTER) < RADIUS * RADIUS;
-
-    // Bedingung für die Augen im Kreis
-    wire in_left_eye = (pix_x >= x_center - 8) && (pix_x <= x_center - 4) &&
-                       (pix_y >= Y_CENTER - 5) && (pix_y <= Y_CENTER - 3);
-
-    wire in_right_eye = (pix_x >= x_center + 4) && (pix_x <= x_center + 8) &&
-                        (pix_y >= Y_CENTER - 5) && (pix_y <= Y_CENTER - 3);
-
-    // Bedingung für den Mund im Kreis
-    wire in_mouth = (pix_x >= x_center - 4) && (pix_x <= x_center + 4) &&
-                    (pix_y >= Y_CENTER + 4) && (pix_y <= Y_CENTER + 5);
-
-    // Bedingungen für den senkrechten Strich
-    wire in_straight_line = (pix_x == x_center) && 
-                            (pix_y > Y_CENTER + RADIUS) && 
-                            (pix_y <= Y_CENTER + RADIUS + STRAIGHT_LENGTH);
-
-    // Bedingungen für den horizontalen Strich mittig am senkrechten Strich
-    wire in_middle_horizontal_left = (pix_y == HORIZONTAL_MID_Y) &&
-                                     (pix_x >= x_center - 20) && (pix_x < x_center);
-
-    wire in_middle_horizontal_right = (pix_y == HORIZONTAL_MID_Y) &&
-                                      (pix_x > x_center) && (pix_x <= x_center + 20);
-
-    // Bedingungen für die schrägen 45-Grad-Striche
-    wire in_left_angle = (pix_y > Y_CENTER + RADIUS + STRAIGHT_LENGTH) &&
-                         (pix_y <= Y_CENTER + RADIUS + STRAIGHT_LENGTH + 20) &&
-                         (pix_x == x_center - (pix_y - Y_CENTER - RADIUS - STRAIGHT_LENGTH));
-
-    wire in_right_angle = (pix_y > Y_CENTER + RADIUS + STRAIGHT_LENGTH) &&
-                          (pix_y <= Y_CENTER + RADIUS + STRAIGHT_LENGTH + 20) &&
-                          (pix_x == x_center + (pix_y - Y_CENTER - RADIUS - STRAIGHT_LENGTH));
-
-    // Farben definieren (Lila: Rot und Blau sind hoch, Grün ist niedrig)
-    assign R = video_active && (in_circle_border || in_straight_line || in_left_angle || in_right_angle || in_middle_horizontal_left || in_middle_horizontal_right || in_left_eye || in_right_eye || in_mouth) ? 2'b11 : 2'b00;
-    assign G = 2'b00; // no G
-    assign B = video_active && (in_circle_border || in_straight_line || in_left_angle || in_right_angle || in_middle_horizontal_left || in_middle_horizontal_right || in_left_eye || in_right_eye || in_mouth) ? 2'b11 : 2'b00;
-
-    // Bewegung der gesamten Figur basierend auf den Zuständen von Pin 1 (ui_in[1]) und Pin 2 (ui_in[2])
-    always @(posedge clk or negedge rst_n) begin
+    // Steuerung der Autobewegung
+    always @(posedge clk) begin
         if (~rst_n) begin
-            x_center <= 320; // Zurücksetzen der X-Position auf den Startwert
+            car_pos_x <= 10'd100; // Startposition des Autos
+            speed_counter <= 0; // Zähler zurücksetzen
         end else begin
-            if (ui_in[1]) begin
-                // Bewege nach links, falls Pin 1 High ist
-                x_center <= (x_center - 1 >= RADIUS) ? x_center - 1 : x_center;
-            end else if (ui_in[2]) begin
-                // Bewege nach rechts, falls Pin 2 High ist
-                x_center <= (x_center + 1 <= 640 - RADIUS) ? x_center + 1 : x_center;
+            if (speed_counter == 21'd2_000_000) begin // Beispielwert für langsame Bewegung
+                speed_counter <= 0; // Zähler zurücksetzen
+
+                if (ui_in[0]) // Wenn Pin 0 auf high
+                    car_pos_x <= car_pos_x - 1; // Bewege nach links
+                else if (ui_in[1]) // Wenn Pin 1 auf high
+                    car_pos_x <= car_pos_x + 1; // Bewege nach rechts
+            end else begin
+                speed_counter <= speed_counter + 1; // Zähler erhöhen
             end
         end
     end
+
+    // Auto und weiße Straße darstellen
+    // Auto besteht aus einem rechteckigen Körper und zwei Rädern
+    wire car_body = (pix_x >= car_pos_x) && (pix_x < car_pos_x + 40) && (pix_y >= 110) && (pix_y < 130);
+    wire car_wheel1 = (pix_x >= car_pos_x + 5) && (pix_x < car_pos_x + 15) && (pix_y >= 130) && (pix_y < 140);
+    wire car_wheel2 = (pix_x >= car_pos_x + 25) && (pix_x < car_pos_x + 35) && (pix_y >= 130) && (pix_y < 140);
+
+    wire road_line = (pix_y >= 145) && (pix_y < 150); // Weiße Linie der Straße
+
+    // Logik, um sicherzustellen, dass das Auto angezeigt wird
+    wire car_on = car_body || car_wheel1 || car_wheel2;
+
+    assign R = video_active ? (car_on ? 2'b11 : (road_line ? 2'b11 : 2'b00)) : 2'b00;
+    assign G = video_active ? (car_on ? 2'b00 : (road_line ? 2'b11 : 2'b00)) : 2'b00;
+    assign B = video_active ? (car_on ? 2'b00 : (road_line ? 2'b11 : 2'b00)) : 2'b00;
 
 endmodule
